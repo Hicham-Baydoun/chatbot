@@ -1,92 +1,137 @@
 "use client";
-
+import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from "ai/react";
 import Markdown from "react-markdown";
-import { SendIcon, SquareIcon } from "lucide-react";
-
+import { SendIcon, SquareIcon, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import Image from "next/image";
+import { collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+interface Review {
+  id: string;
+  rating: number;
+  feedback: string;
+  timestamp?: Date;
+}
 
 export function Chatbot() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, stop } =
-    useChat({
-      api: "api/chat",
+  const { messages, input, handleInputChange, handleSubmit: handleChatSubmit, isLoading, stop, setMessages } = useChat({ api: "/api/chat" });
+  const [showReviews, setShowReviews] = useState(false);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [userFeedback, setUserFeedback] = useState<string>('');
+  const [rating, setRating] = useState(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchReviews();
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const fetchReviews = async () => {
+    const q = query(collection(db, 'feedback'), orderBy('timestamp', 'desc'), limit(10));
+    const querySnapshot = await getDocs(q);
+    
+    const fetchedReviews: Review[] = querySnapshot.docs.map(doc => {
+      const data = doc.data() as Omit<Review, 'id'>;
+      return { id: doc.id, ...data };
     });
+  
+    setReviews(fetchedReviews);
+  };
+
+  const handleFeedbackSubmit = async (rating: number) => {
+    try {
+      await addDoc(collection(db, 'feedback'), {
+        rating,
+        feedback: userFeedback,
+        timestamp: new Date(),
+      });
+      fetchReviews();
+      setShowReviews(false);
+      setUserFeedback('');
+    } catch (error) {
+      console.error('Error submitting feedback:', error);
+    }
+  };
 
   return (
-    <div className="flex flex-col h-[80vh] w-full max-w-[672px] mx-auto bg-background rounded-lg shadow-lg">
-      <div className="flex-1 overflow-auto p-6">
-        {messages.length === 0 && (
-          <div className="flex flex-col justify-center items-center h-full">
-            <Image src="/ai.png" alt="AI" width={80} height={80} />
-            <p className="text-lg text-muted-foreground mt-4">
-              Welcome to the Chatbot! Ask me anything.
-            </p>
-          </div>
-        )}
-        <div className="flex flex-col gap-4">
-          {messages.map((message) =>
-            message.role === "assistant" ? (
-              <div key={message.id} className="flex items-start gap-3">
-                <div className="p-2 border border-gray-700 rounded-full">
-                  <Image src="/ai.png" alt="AI" width={20} height={20} />
-                </div>
-                <div className="bg-muted rounded-lg p-3 max-w-[70%]">
-                  <Markdown className="text-sm text-muted-foreground">
-                    {message.content}
-                  </Markdown>
-                </div>
-              </div>
-            ) : (
-              <div key={message.id} className="flex justify-end">
-                <div className="bg-primary rounded-lg p-3 max-w-[70%]">
-                  <p className="text-sm text-primary-foreground">
-                    {message.content}
-                  </p>
-                </div>
-              </div>
-            )
-          )}
-        </div>
+    <div className="flex flex-col h-[80vh] w-full max-w-3xl mx-auto bg-white rounded-lg shadow-xl overflow-hidden">
+      
+      <div className="flex flex-col items-center mb-4">
+        <p className="text-gray-600">Welcome to the Chatbot! Ask me anything.</p>
       </div>
-      <form
-        onSubmit={handleSubmit}
-        className="bg-muted/50 px-4 py-3 flex items-center gap-2"
-      >
-        <div className="relative flex-1">
-          <Textarea
-            placeholder="Type your message..."
-            className="rounded-lg pr-12 min-h-[64px]"
-            rows={1}
-            value={input}
-            onChange={handleInputChange}
-          />
 
-          {!isLoading ? (
-            <Button
-              type="submit"
-              size="icon"
-              disabled={!input || isLoading}
-              className="absolute bottom-3 right-3 rounded-full"
-            >
-              <SendIcon className="w-5 h-5" />
-              <span className="sr-only">Send</span>
-            </Button>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((message) => (
+          <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[70%] rounded-lg p-3 ${message.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+              <Markdown>{message.content}</Markdown>
+            </div>
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <form onSubmit={handleChatSubmit} className="p-4 bg-gray-100 flex items-center space-x-2">
+        <Textarea
+          value={input}
+          onChange={handleInputChange}
+          placeholder="Type your message..."
+          className="flex-1 resize-none"
+          rows={1}
+        />
+        <Button type="submit" disabled={isLoading} className="bg-black hover:bg-gray-800 text-white">
+          {isLoading ? (
+            <SquareIcon className="animate-spin" />
           ) : (
-            <Button
-              type="button"
-              size="icon"
-              disabled={!isLoading}
-              onClick={stop}
-              className="absolute bottom-3 right-3 rounded-full"
-            >
-              <SquareIcon className="w-5 h-5" fill="white" />
-              <span className="sr-only">Send</span>
-            </Button>
+            <SendIcon />
           )}
-        </div>
+        </Button>
       </form>
+      
+      <div className="p-4 bg-gray-100 flex justify-between items-center">
+        <div className="flex space-x-2">
+          <Button onClick={() => handleFeedbackSubmit(1)} className="bg-green-500 hover:bg-green-600 text-white">
+            <ThumbsUp size={20} />
+          </Button>
+          <Button onClick={() => handleFeedbackSubmit(0)} className="bg-red-500 hover:bg-red-600 text-white">
+            <ThumbsDown size={20} />
+          </Button>
+        </div>
+        <Textarea
+          value={userFeedback}
+          onChange={(e) => setUserFeedback(e.target.value)}
+          placeholder="Any additional feedback?"
+          className="flex-1 mx-2 resize-none"
+          rows={1}
+        />
+        <Button 
+          onClick={() => setShowReviews(!showReviews)} 
+          className="bg-black hover:bg-gray-800 text-white"
+        >
+          Reviews
+        </Button>
+      </div>
+
+      {showReviews && (
+        <div className="absolute bottom-24 right-4 w-64 bg-white p-4 rounded-lg shadow-lg z-20 max-h-80 overflow-y-auto">
+          <h3 className="font-bold mb-2">Recent Reviews</h3>
+          {reviews.map(review => (
+            <div key={review.id} className="mb-2 p-2 bg-gray-100 rounded">
+              <p>Rating: {review.rating ? '👍' : '👎'}</p>
+              <p className="text-sm">{review.feedback}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
